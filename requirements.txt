@@ -1,0 +1,8 @@
+
+discord.py
+llama-cpp
+sentence-transformers
+chromadb
+pytesseract
+pillow
+requests
