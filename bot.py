@@ -1,99 +1,165 @@
-
+import os
 import discord
+import asyncio
 from llama_cpp import Llama
 from sentence_transformers import SentenceTransformer
 import chromadb
 import pytesseract
 from PIL import Image
-import requests
+import aiohttp
 from io import BytesIO
 
-from config import ASANA_TOKEN, PROYECTO_ID, TECNICOS, RECURSOS_EMPRESA
+from config import get_projects, get_users, oauth
 
-TOKEN = "TU_TOKEN_DISCORD"
+# === TOKEN DISCORD ===
+TOKEN = os.getenv("DISCORD_TOKEN") or "TU_TOKEN_DISCORD"
 
-llm = Llama(model_path="models/mistral.gguf", n_ctx=2048, n_threads=6)
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
+# === Carga diferida ===
+llm = None
+embedder = None
+
+# === Chroma DB ===
 chroma = chromadb.Client()
 collection = chroma.get_or_create_collection("docs")
 
+# === Discord ===
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 
-def es_problema_interno(texto):
-    texto = texto.lower()
-    for recurso in RECURSOS_EMPRESA:
-        if recurso in texto:
-            return True
-    return False
+# === Listas útiles ===
+SALUDOS = ["hola", "buenos días", "buenas tardes", "buenas", "saludos", "qué tal", "hi", "hello"]
+PALABRAS_PROBLEMA = ["error", "falla", "problema", "no funciona", "no carga", "pantalla", "crash", "bug", "congelado"]
 
-def asignar_tecnico(categoria):
-    for tecnico in TECNICOS:
-        if categoria in tecnico["categorias"]:
-            return tecnico["id"]
-    return TECNICOS[0]["id"]
-
-def crear_tarea_asana(titulo, descripcion, responsable_id):
-    import requests
-    headers = {
-        "Authorization": f"Bearer {ASANA_TOKEN}",
-        "Content-Type": "application/json"
-    }
+# === Asana ===
+def crear_tarea_asana(titulo, descripcion, responsable_id, proyecto_id):
+    headers = {"Content-Type": "application/json"}
     data = {
         "data": {
             "name": titulo,
             "notes": descripcion,
             "assignee": responsable_id,
-            "projects": [PROYECTO_ID]
+            "projects": [proyecto_id]
         }
     }
-    response = requests.post("https://app.asana.com/api/1.0/tasks", headers=headers, json=data)
+    response = oauth.post("https://app.asana.com/api/1.0/tasks", headers=headers, json=data)
     return response.status_code
 
+# === IA: Obtener respuesta del modelo ===
+async def generar_respuesta_llm(prompt):
+    global llm
+    if llm is None:
+        print("🔄 Cargando modelo...")
+        llm = Llama(
+            model_path="models/phi-2.Q4_0.gguf",  # Puedes cambiar a Q2_K si es muy pesado
+            n_ctx=512,
+            n_threads=2
+        )
+
+    print("🧠 PROMPT:\n", prompt.strip())
+
+    output = await asyncio.to_thread(
+        lambda: llm(prompt=prompt, stop=["Usuario:", "</s>", "Asistente:"], max_tokens=150)
+    )
+
+    print("🧠 RAW OUTPUT:", output)
+
+    respuesta = output["choices"][0].get("text", "").strip()
+    if not respuesta:
+        respuesta = "Lo siento, no entendí tu mensaje. ¿Puedes decirlo de otra forma?"
+    return respuesta
+
+# === OCR (Imagen a texto) ===
+async def obtener_texto_imagen(url):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            img = Image.open(BytesIO(await resp.read()))
+            return pytesseract.image_to_string(img)
+
+# === Evento de conexión ===
 @client.event
 async def on_ready():
     print(f"✅ Bot conectado como {client.user}")
 
+# === Evento de mensaje ===
 @client.event
 async def on_message(message):
     if message.author.bot:
         return
 
+    query = ""
+
+    # 📷 Procesar imagen si hay adjunto
     if message.attachments:
         for file in message.attachments:
-            if file.content_type.startswith("image"):
-                response = requests.get(file.url)
-                img = Image.open(BytesIO(response.content))
-                text = pytesseract.image_to_string(img)
-                await message.channel.send(f"🖼️ Texto detectado: ```{text.strip()[:200]}...```")
-                query = text
+            if file.content_type and file.content_type.startswith("image"):
+                texto = await obtener_texto_imagen(file.url)
+                query = texto.strip()[:300]
+                await message.channel.send(f"🖼️ Texto detectado: ```{query[:200]}...```")
                 break
-    else:
-        query = message.content
+
+    if not query:
+        query = message.content.strip()
+
+    texto_lower = query.lower()
+
+    # 🖐️ Saludo simple
+    if any(saludo in texto_lower for saludo in SALUDOS):
+        await message.channel.send("👋 ¡Hola! Soy tu asistente técnico. ¿En qué puedo ayudarte hoy?")
+        return
+
+    # === IA Embedding y contexto ===
+    global embedder
+    if embedder is None:
+        embedder = SentenceTransformer("paraphrase-MiniLM-L3-v2")
 
     query_embed = embedder.encode(query).tolist()
     result = collection.query(query_embeddings=[query_embed], n_results=1)
-    contexto = result["documents"][0][0] if result["documents"] else "Sin contexto."
+    contexto = result["documents"][0][0] if result.get("documents") and result["documents"][0] else "Sin contexto."
 
-    prompt = f"""
-Eres un asistente técnico para una empresa. Usa la información si es útil:
+    # === Si parece un problema técnico ===
+    if any(palabra in texto_lower for palabra in PALABRAS_PROBLEMA):
+        prompt = f"""
+Eres un asistente técnico que ayuda a los usuarios con problemas tecnológicos. Usa esta información si es útil:
 {contexto}
 
-Pregunta: {query}
+Usuario: {query}
 ¿Este problema parece interno (relacionado a la empresa) o externo?
-Respuesta:
-"""
+Explica por qué brevemente.
+Asistente:"""
 
-    output = llm(prompt=prompt, stop=["\n"], max_tokens=200)
-    respuesta = output["choices"][0]["text"].strip()
-    interno = es_problema_interno(query) or "sí" in respuesta.lower()
+        respuesta = await generar_respuesta_llm(prompt)
 
-    if interno:
-        responsable_id = asignar_tecnico("windows")  # puedes ajustar la categoría
-        crear_tarea_asana(titulo=query[:50], descripcion=f"{query}
+        if "sí" in respuesta.lower() or "interno" in respuesta.lower():
+            users = get_users("workspace_id_placeholder")
+            proyectos = get_projects("workspace_id_placeholder")
 
-{contexto}", responsable_id=responsable_id)
-        await message.channel.send("🛠️ No pude resolverlo. Se ha escalado a soporte técnico.")
+            responsable_id = users[0]["gid"] if users else None
+            proyecto_id = proyectos[0]["gid"] if proyectos else None
+
+            if responsable_id and proyecto_id:
+                crear_tarea_asana(
+                    titulo=query[:50],
+                    descripcion=f"{query}\n\n{contexto}",
+                    responsable_id=responsable_id,
+                    proyecto_id=proyecto_id
+                )
+                await message.channel.send("🛠️ No pude resolverlo. Se ha escalado a soporte técnico.")
+            else:
+                await message.channel.send("⚠️ No se pudo asignar la tarea por falta de datos.")
+        else:
+            await message.channel.send(f"🤖 {respuesta}")
     else:
-        await message.channel.send(f"🤖 {respuesta}")
+        # 💬 Conversación casual
+        prompt = f"""
+Eres un asistente amigable y conversacional. Responde de manera natural y clara.
+
+Usuario: {query}
+Asistente:"""
+
+        respuesta = await generar_respuesta_llm(prompt)
+        await message.channel.send(f"💬 {respuesta}")
+
+# === Iniciar bot ===
+if __name__ == '__main__':
+    client.run(TOKEN)

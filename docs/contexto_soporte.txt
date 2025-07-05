@@ -1,0 +1,35 @@
+Bienvenido al centro de soporte de la empresa YANDEV S.A.
+
+RECURSOS INTERNOS DISPONIBLES:
+- VPN Corporativa: Permite a los empleados conectarse a la red interna de forma segura desde cualquier lugar.
+- Correo Interno: Plataforma de comunicación exclusiva para empleados. Servidor: correo.yandev.local
+- Portal de la Empresa: https://intranet.yandev.com - Aquí se accede a documentos, políticas y el CRM.
+- Impresoras: Las oficinas cuentan con impresoras HP LaserJet configuradas por red.
+
+PROBLEMAS FRECUENTES Y SOLUCIONES:
+
+1. VPN no conecta:
+   - Verifica que tengas acceso a Internet.
+   - Asegúrate de usar tus credenciales institucionales.
+   - El puerto 1194 debe estar habilitado.
+
+2. No recibo correos:
+   - Revisa la carpeta de spam.
+   - Asegúrate de no haber superado tu cuota de almacenamiento.
+   - Contacta a soporte si persiste.
+
+3. Portal no carga:
+   - Revisa que estés conectado a la red interna o VPN.
+   - Borra caché del navegador.
+   - Intenta con otro navegador.
+
+CATEGORÍAS DE INCIDENTES:
+- Windows: Problemas con el sistema operativo, errores de arranque, actualizaciones.
+- Redes: Problemas de conexión a Internet, cableado, routers.
+- Software: Instalación de programas, licencias, errores de aplicaciones.
+- Impresoras: Problemas de impresión, cartuchos, atascos.
+
+CONTACTO DE SOPORTE:
+- Horario: Lunes a Viernes de 8:00 a.m. a 5:00 p.m.
+- Correo: soporte@yandev.com
+- Teléfono interno: 1234

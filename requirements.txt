@@ -1,8 +1,7 @@
-
-discord.py
-llama-cpp
-sentence-transformers
-chromadb
-pytesseract
-pillow
-requests
+discord.py>=2.3.2
+llama-cpp-python>=0.2.55
+sentence-transformers>=2.7.0
+chromadb>=0.4.24
+pytesseract>=0.3.10
+pillow>=10.3.0
+requests>=2.31.0
